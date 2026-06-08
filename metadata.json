@@ -1,0 +1,1 @@
+{"name":"Video Conferencing Platform","description":"Collaborative video conferencing application featuring WebRTC, real-time chat, polls, scheduling, and attendance tracking.","requestFramePermissions":["camera","microphone","display-capture"],"majorCapabilities":["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]}

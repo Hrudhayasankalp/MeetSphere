@@ -1,0 +1,59 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Debugger logs and crash reports
+.directory
+.trash
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Diagnostic report files
+*.cpuprofile
+*.heapprofile
+*.memprofile
+
+# Compiler outputs
+dist/
+dist-ssr/
+*.tsbuildinfo
+
+# Local env files (Crucial to prevent pushing private keys/passwords)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# IDEs and editors
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Agent tool metadata
+.antigravity/
