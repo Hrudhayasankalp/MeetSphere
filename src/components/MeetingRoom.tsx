@@ -91,6 +91,8 @@ export default function MeetingRoom({ roomCode, onLeave, isDarkMode, onToggleThe
   // Mobile layout states
   const [isMobile, setIsMobile] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isCameraSimulated, setIsCameraSimulated] = useState(false);
+  const [cameraPermissionError, setCameraPermissionError] = useState<string | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -601,19 +603,27 @@ export default function MeetingRoom({ roomCode, onLeave, isDarkMode, onToggleThe
 
     // Initialize local devices
     const initLocalDevices = async () => {
+      setCameraPermissionError(null);
       try {
         let stream: MediaStream | null = null;
         try {
           stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          setIsCameraSimulated(false);
         } catch (dualErr) {
           console.warn("Dual mic/cam capture failed, testing separate channels...", dualErr);
           try {
             stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            setIsCameraSimulated(false);
+            setCameraPermissionError("Microphone permission denied. Audio muted.");
           } catch (videoErr) {
             try {
               stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+              setIsCameraSimulated(true);
+              setCameraPermissionError("Camera permission denied. Using simulated avatar.");
             } catch (audioErr) {
               console.warn("No camera or mic hardware, creating fallback canvas feed...", audioErr);
+              setIsCameraSimulated(true);
+              setCameraPermissionError("Camera and Microphone blocked. Please enable permissions in your browser settings.");
               const fallback = createCanvasFallbackStream();
               if (fallback) {
                 stream = fallback;
@@ -641,6 +651,8 @@ export default function MeetingRoom({ roomCode, onLeave, isDarkMode, onToggleThe
 
       } catch (err) {
         console.warn("Could not access camera/mic, falling back to simulated visuals:", err);
+        setIsCameraSimulated(true);
+        setCameraPermissionError("Camera and Microphone blocked. Please enable permissions in your browser settings.");
         const fallback = createCanvasFallbackStream();
         if (fallback) {
           localStreamRef.current = fallback;
@@ -842,7 +854,71 @@ export default function MeetingRoom({ roomCode, onLeave, isDarkMode, onToggleThe
     localCamLoopRef.current = requestAnimationFrame(draw);
   };
 
-  const toggleMic = () => {
+  const convertSimulatedToRealCamera = async () => {
+    try {
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      } catch (e) {
+        // Try video only
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+      
+      // Successfully got real camera!
+      setIsCameraSimulated(false);
+      setCameraPermissionError(null);
+      
+      // Stop the old simulated tracks
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+      
+      const videoTrack = stream.getVideoTracks()[0];
+      const audioTrack = stream.getAudioTracks()[0];
+      
+      setCamActive(videoTrack ? videoTrack.enabled : false);
+      setMicActive(audioTrack ? audioTrack.enabled : false);
+      
+      // Replace tracks in all active peer connections
+      pcsRef.current.forEach(async (pc) => {
+        const senders = pc.getSenders();
+        const videoSender = senders.find(s => s.track && s.track.kind === "video");
+        const audioSender = senders.find(s => s.track && s.track.kind === "audio");
+        
+        if (videoSender && videoTrack) {
+          try {
+            await videoSender.replaceTrack(videoTrack);
+          } catch (err) {
+            console.warn("Could not replace video track in PC:", err);
+          }
+        }
+        if (audioSender && audioTrack) {
+          try {
+            await audioSender.replaceTrack(audioTrack);
+          } catch (err) {
+            console.warn("Could not replace audio track in PC:", err);
+          }
+        }
+      });
+      
+      if (socketRef.current) {
+        socketRef.current.emit("toggle-media", { roomCode, mediaType: "cam", status: videoTrack ? videoTrack.enabled : false });
+        socketRef.current.emit("toggle-media", { roomCode, mediaType: "mic", status: audioTrack ? audioTrack.enabled : false });
+      }
+    } catch (err) {
+      console.warn("Failed to convert simulated to real camera:", err);
+      alert("Could not access real camera. Please make sure you have allowed camera permissions for this site in your browser settings.");
+    }
+  };
+
+  const toggleMic = async () => {
+    if (isCameraSimulated) {
+      await convertSimulatedToRealCamera();
+      return;
+    }
     const nextVal = !micActive;
     setMicActive(nextVal);
     if (localStreamRef.current) {
@@ -868,7 +944,11 @@ export default function MeetingRoom({ roomCode, onLeave, isDarkMode, onToggleThe
     }
   };
 
-  const toggleCam = () => {
+  const toggleCam = async () => {
+    if (isCameraSimulated) {
+      await convertSimulatedToRealCamera();
+      return;
+    }
     const nextVal = !camActive;
     setCamActive(nextVal);
     if (localStreamRef.current) {
@@ -1634,8 +1714,19 @@ export default function MeetingRoom({ roomCode, onLeave, isDarkMode, onToggleThe
                 <VideoOff className="w-8 h-8 text-white/30 mb-2" />
                 <span className="text-xs font-bold text-white/50">Camera Paused</span>
               </div>
-              <div className="absolute top-4 left-4 bg-[#1A1A1A]/80 backdrop-blur-sm px-3 py-1 rounded-xl text-xs font-bold border border-white/10 z-2 flex items-center gap-1.5 text-white">
-                <span className="h-1.5 w-1.5 bg-[#C9A84C] rounded-full animate-ping"></span> You ({user?.name || guestName || "Guest"})
+              <div className="absolute top-4 left-4 right-4 flex flex-wrap gap-2 items-center justify-between z-2">
+                <div className="bg-[#1A1A1A]/80 backdrop-blur-sm px-3 py-1 rounded-xl text-xs font-bold border border-white/10 flex items-center gap-1.5 text-white">
+                  <span className="h-1.5 w-1.5 bg-[#C9A84C] rounded-full animate-ping"></span> You ({user?.name || guestName || "Guest"})
+                </div>
+                {isCameraSimulated && (
+                  <button
+                    onClick={convertSimulatedToRealCamera}
+                    className="bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-md transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
+                    title="Camera blocked. Tap to grant permission and retry."
+                  >
+                    <Sparkles className="w-3 h-3 animate-pulse" /> Camera Blocked (Tap to Retry)
+                  </button>
+                )}
               </div>
             </div>
 
